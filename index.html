@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>System Design Visualizer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  height: 100vh;
+  display: flex;
+  background: #f3f4f6;
+}
+
+/* Sidebar (Desktop) */
+.sidebar {
+  width: 220px;
+  background: #0f172a;
+  color: white;
+  padding: 12px;
+}
+
+.sidebar h3 {
+  margin: 10px 0;
+  font-size: 14px;
+}
+
+.btn {
+  width: 100%;
+  padding: 8px;
+  margin-bottom: 6px;
+  border: none;
+  border-radius: 4px;
+  background: #2563eb;
+  color: white;
+  cursor: pointer;
+}
+
+/* Canvas */
+#canvas {
+  flex: 1;
+  position: relative;
+  background: white;
+  overflow: hidden;
+}
+
+/* Boxes */
+.box {
+  position: absolute;
+  width: 150px;
+  background: #e5e7eb;
+  border: 2px solid #1f2937;
+  border-radius: 6px;
+  padding: 6px;
+  touch-action: none;
+}
+
+.box input {
+  width: 100%;
+  border: none;
+  font-weight: bold;
+  background: transparent;
+  text-align: center;
+}
+
+.notes {
+  width: 100%;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+/* SVG */
+svg {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Mobile Bottom Bar */
+.mobile-bar {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #0f172a;
+  padding: 6px;
+  gap: 6px;
+}
+
+.mobile-bar button {
+  flex: 1;
+  padding: 8px;
+  background: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  body { flex-direction: column; }
+  .sidebar { display: none; }
+  .mobile-bar { display: flex; }
+  #canvas { height: calc(100vh - 50px); }
+}
+</style>
+</head>
+
+<body>
+
+<!-- Desktop Sidebar -->
+<div class="sidebar">
+  <h3>Components</h3>
+  <button class="btn" onclick="addBox('Client')">Client</button>
+  <button class="btn" onclick="addBox('Server')">Server</button>
+  <button class="btn" onclick="addBox('Database')">Database</button>
+  <button class="btn" onclick="addBox('Cache')">Cache</button>
+  <button class="btn" onclick="addBox('API')">API</button>
+
+  <h3>Actions</h3>
+  <button class="btn" onclick="exportPNG()">Export PNG</button>
+  <button class="btn" onclick="clearAll()">Clear</button>
+</div>
+
+<!-- Canvas -->
+<div id="canvas">
+  <svg id="svg">
+    <defs>
+      <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L9,3 z" fill="black"/>
+      </marker>
+    </defs>
+  </svg>
+</div>
+
+<!-- Mobile Bottom Bar -->
+<div class="mobile-bar">
+  <button onclick="addBox('Client')">Client</button>
+  <button onclick="addBox('Server')">Server</button>
+  <button onclick="addBox('DB')">DB</button>
+  <button onclick="exportPNG()">Export</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+
+<script>
+let boxes = JSON.parse(localStorage.getItem("boxes")) || [];
+let links = JSON.parse(localStorage.getItem("links")) || [];
+let selected = null;
+
+const canvas = document.getElementById("canvas");
+const svg = document.getElementById("svg");
+
+function save() {
+  localStorage.setItem("boxes", JSON.stringify(boxes));
+  localStorage.setItem("links", JSON.stringify(links));
+}
+
+function addBox(type) {
+  boxes.push({ id: Date.now(), x: 40, y: 40, title: type, note: "" });
+  save(); render();
+}
+
+function render() {
+  document.querySelectorAll(".box").forEach(e => e.remove());
+  svg.querySelectorAll("line,text").forEach(e => e.remove());
+
+  links.forEach(l => {
+    const a = boxes.find(b => b.id === l.from);
+    const b = boxes.find(b => b.id === l.to);
+    if (!a || !b) return;
+
+    const x1 = a.x + 75, y1 = a.y + 30;
+    const x2 = b.x + 75, y2 = b.y + 30;
+
+    const line = document.createElementNS("http://www.w3.org/2000/svg","line");
+    line.setAttribute("x1", x1);
+    line.setAttribute("y1", y1);
+    line.setAttribute("x2", x2);
+    line.setAttribute("y2", y2);
+    line.setAttribute("stroke","black");
+    line.setAttribute("marker-end","url(#arrow)");
+    svg.appendChild(line);
+
+    const t = document.createElementNS("http://www.w3.org/2000/svg","text");
+    t.setAttribute("x",(x1+x2)/2);
+    t.setAttribute("y",(y1+y2)/2);
+    t.textContent = l.label;
+    t.setAttribute("font-size","12");
+    svg.appendChild(t);
+  });
+
+  boxes.forEach(b => {
+    const d = document.createElement("div");
+    d.className = "box";
+    d.style.left = b.x + "px";
+    d.style.top = b.y + "px";
+    d.innerHTML = `
+      <input value="${b.title}">
+      <textarea class="notes" placeholder="Notes...">${b.note}</textarea>
+    `;
+
+    d.addEventListener("pointerdown", e => drag(e, b));
+    d.onclick = e => connect(e, b);
+
+    d.querySelector("input").oninput = e => { b.title = e.target.value; save(); };
+    d.querySelector("textarea").oninput = e => { b.note = e.target.value; save(); };
+
+    canvas.appendChild(d);
+  });
+}
+
+function drag(e, b) {
+  const startX = e.clientX;
+  const startY = e.clientY;
+  const ox = b.x;
+  const oy = b.y;
+
+  document.onpointermove = ev => {
+    b.x = ox + (ev.clientX - startX);
+    b.y = oy + (ev.clientY - startY);
+    render(); save();
+  };
+
+  document.onpointerup = () => document.onpointermove = null;
+}
+
+function connect(e, b) {
+  e.stopPropagation();
+  if (!selected) selected = b;
+  else if (selected.id !== b.id) {
+    const label = prompt("Connection label:", "HTTP");
+    links.push({ from: selected.id, to: b.id, label });
+    selected = null;
+    save(); render();
+  }
+}
+
+canvas.onclick = () => selected = null;
+
+function clearAll() {
+  if (confirm("Clear diagram?")) {
+    boxes = []; links = []; save(); render();
+  }
+}
+
+function exportPNG() {
+  html2canvas(canvas).then(c => {
+    const a = document.createElement("a");
+    a.download = "system-design.png";
+    a.href = c.toDataURL();
+    a.click();
+  });
+}
+
+render();
+</script>
+</body>
+</html>
